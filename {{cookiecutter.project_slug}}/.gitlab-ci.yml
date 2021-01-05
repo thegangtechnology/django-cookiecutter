@@ -1,0 +1,69 @@
+image: docker:stable
+
+services:
+  - docker:dind
+  - postgres:12.2-alpine
+
+stages:
+  - Lint
+  - Tests
+  - Static Test
+
+variables:
+  PROJECT_NAME: {{ cookiecutter.project_slug }}
+
+  POSTGRES_DB: {{ cookiecutter.project_slug }}
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: "postgres"
+  POSTGRES_HOST_AUTH_METHOD: trust
+
+  {% if cookiecutter.use_sonarqube == 'y'-%}
+  SONAR_TOKEN: "$SONAR_TOKEN"
+  SONAR_HOST_URL: "https://sonarqube.dev.thegang.tech"
+  {%- endif %}
+
+flake8:
+  stage: Lint
+  image: python:3.8
+  before_script:
+    - pip install flake8
+  script:
+    - flake8
+  allow_failure: false
+
+test-and-coverage:
+  stage: Tests
+  image: 
+    name: python:3.9
+  before_script:
+    - pip install pipenv
+    - pipenv install --system --deploy --ignore-pipfile
+  script:
+    - pytest
+  rules:
+    - when: on_success
+      allow_failure: false
+  variables:
+    DATABASE_URL: postgres://postgres:postgres@postgres:5432/$PROJECT_NAME
+  artifacts:
+        paths:
+          - coverage.xml
+        expire_in: 1 week
+
+{% if cookiecutter.use_sonarqube == 'y'-%}
+sonarqube:
+  stage: Static Test
+  image: 
+    name: sonarsource/sonar-scanner-cli
+  script:
+    - sonar-scanner -Dsonar.projectKey=$PROJECT_NAME
+      -Dsonar.python.coverage.reportPaths=coverage.xml
+      -Dsonar.qualitygate.wait=true
+  dependencies:
+    - test-and-coverage
+  rules:
+    - when: on_success
+      allow_failure: false
+  variables:
+    GIT_DEPTH: 0
+{%- endif %}
